@@ -89,8 +89,35 @@ body:hover #cursor{opacity:1}
 canvas{
   position:fixed;
   inset:0;
-  opacity:.25;
   z-index:0;
+}
+
+#matrix-canvas{ opacity:.18; }
+#radar-canvas{
+  opacity:.6;
+  inset:auto;
+  bottom:24px;
+  left:24px;
+  width:140px;
+  height:140px;
+  position:fixed;
+  z-index:3;
+}
+
+/* ─── SCANLINES ─── */
+body::after{
+  content:"";
+  position:fixed;
+  inset:0;
+  background:repeating-linear-gradient(
+    0deg,
+    rgba(0,245,255,0.025) 0px,
+    rgba(0,245,255,0.025) 1px,
+    transparent 1px,
+    transparent 4px
+  );
+  pointer-events:none;
+  z-index:1;
 }
 
 /* ─── NAV ─── */
@@ -563,7 +590,8 @@ footer{
 <div id="cursor-ring"></div>
 
 <!-- CANVAS BG -->
-<canvas id="bg"></canvas>
+<canvas id="matrix-canvas"></canvas>
+<canvas id="radar-canvas"></canvas>
 
 <!-- NAV -->
 <nav id="nav">
@@ -756,69 +784,122 @@ footer{
 </footer>
 
 <script>
-/* ── CANVAS NETWORK ── */
-const canvas = document.getElementById('bg');
-const ctx = canvas.getContext('2d');
-let W, H, nodes = [], animId;
+/* ── MATRIX RAIN ── */
+const mc = document.getElementById('matrix-canvas');
+const mctx = mc.getContext('2d');
+let MW, MH, drops = [], matrixAnimId;
 
-function resize() {
-  W = canvas.width = innerWidth;
-  H = canvas.height = innerHeight;
+const CHARS = "01アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホ";
+const FS = 14;
+
+function matrixResize() {
+  MW = mc.width = innerWidth;
+  MH = mc.height = innerHeight;
+  drops = Array(Math.floor(MW / FS)).fill(1);
 }
 
-function init() {
-  nodes = [];
-  const count = Math.min(Math.floor((W * H) / 28000), 60);
-  for (let i = 0; i < count; i++) {
-    nodes.push({
-      x: Math.random() * W,
-      y: Math.random() * H,
-      vx: (Math.random() - .5) * .4,
-      vy: (Math.random() - .5) * .4
-    });
+function drawMatrix() {
+  mctx.fillStyle = "rgba(3,10,13,0.07)";
+  mctx.fillRect(0, 0, MW, MH);
+  mctx.font = FS + "px monospace";
+
+  for (let i = 0; i < drops.length; i++) {
+    const ch = CHARS[Math.floor(Math.random() * CHARS.length)];
+    const bright = Math.random() > 0.95;
+    mctx.fillStyle = bright ? "rgba(255,255,255,0.9)" : "rgba(0,245,255,0.6)";
+    mctx.fillText(ch, i * FS, drops[i] * FS);
+    if (drops[i] * FS > MH && Math.random() > 0.975) drops[i] = 0;
+    drops[i]++;
   }
+  matrixAnimId = requestAnimationFrame(drawMatrix);
 }
 
-function draw() {
-  ctx.clearRect(0, 0, W, H);
+/* ── RADAR ── */
+const rc = document.getElementById('radar-canvas');
+const rctx = rc.getContext('2d');
+rc.width = 140; rc.height = 140;
+const RR = 62, RX = 70, RY = 70;
+let radarAngle = 0, pingR = 0;
 
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
-      const dx = nodes[i].x - nodes[j].x;
-      const dy = nodes[i].y - nodes[j].y;
-      const d = dx * dx + dy * dy;
-      if (d < 18000) {
-        ctx.beginPath();
-        ctx.moveTo(nodes[i].x, nodes[i].y);
-        ctx.lineTo(nodes[j].x, nodes[j].y);
-        ctx.strokeStyle = `rgba(0,245,255,${(1 - d / 18000) * .5})`;
-        ctx.lineWidth = .5;
-        ctx.stroke();
-      }
-    }
-  }
+function drawRadar() {
+  rctx.clearRect(0, 0, 140, 140);
 
-  nodes.forEach(n => {
-    ctx.beginPath();
-    ctx.arc(n.x, n.y, 1.5, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(0,245,255,.7)";
-    ctx.fill();
-    n.x += n.vx; n.y += n.vy;
-    if (n.x < 0 || n.x > W) n.vx *= -1;
-    if (n.y < 0 || n.y > H) n.vy *= -1;
+  /* glow bg */
+  rctx.fillStyle = "rgba(0,10,14,0.7)";
+  rctx.beginPath();
+  rctx.arc(RX, RY, RR, 0, Math.PI * 2);
+  rctx.fill();
+
+  /* rings */
+  [1, 0.66, 0.33].forEach(f => {
+    rctx.beginPath();
+    rctx.arc(RX, RY, RR * f, 0, Math.PI * 2);
+    rctx.strokeStyle = "rgba(0,245,255,0.25)";
+    rctx.lineWidth = 0.8;
+    rctx.stroke();
   });
 
-  animId = requestAnimationFrame(draw);
+  /* crosshairs */
+  rctx.strokeStyle = "rgba(0,245,255,0.2)";
+  rctx.lineWidth = 0.8;
+  rctx.beginPath(); rctx.moveTo(RX - RR, RY); rctx.lineTo(RX + RR, RY); rctx.stroke();
+  rctx.beginPath(); rctx.moveTo(RX, RY - RR); rctx.lineTo(RX, RY + RR); rctx.stroke();
+
+  /* sweep gradient */
+  const grad = rctx.createConicalGradient
+    ? null
+    : null;
+  rctx.save();
+  rctx.beginPath();
+  rctx.moveTo(RX, RY);
+  rctx.arc(RX, RY, RR, radarAngle - 1.2, radarAngle);
+  rctx.closePath();
+  rctx.fillStyle = "rgba(0,245,255,0.12)";
+  rctx.fill();
+  rctx.restore();
+
+  /* sweep line */
+  rctx.beginPath();
+  rctx.moveTo(RX, RY);
+  rctx.lineTo(RX + RR * Math.cos(radarAngle), RY + RR * Math.sin(radarAngle));
+  rctx.strokeStyle = "rgba(0,245,255,0.9)";
+  rctx.lineWidth = 1.5;
+  rctx.stroke();
+
+  /* ping */
+  rctx.beginPath();
+  rctx.arc(RX, RY, pingR, 0, Math.PI * 2);
+  rctx.strokeStyle = `rgba(0,245,255,${0.5 - pingR / RR * 0.5})`;
+  rctx.lineWidth = 1;
+  rctx.stroke();
+  pingR += 1.2;
+  if (pingR > RR) pingR = 0;
+
+  /* outer ring */
+  rctx.beginPath();
+  rctx.arc(RX, RY, RR, 0, Math.PI * 2);
+  rctx.strokeStyle = "rgba(0,245,255,0.6)";
+  rctx.lineWidth = 1.5;
+  rctx.stroke();
+
+  /* label */
+  rctx.fillStyle = "rgba(0,245,255,0.5)";
+  rctx.font = "7px monospace";
+  rctx.textAlign = "center";
+  rctx.fillText("IMHOTIP.SYS", RX, RY + RR + 12);
+
+  radarAngle += 0.035;
+  requestAnimationFrame(drawRadar);
 }
 
-/* pause when tab hidden */
+/* pause when hidden */
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { cancelAnimationFrame(animId); }
-  else { draw(); }
+  if (document.hidden) { cancelAnimationFrame(matrixAnimId); }
+  else { drawMatrix(); }
 });
 
-resize(); init(); draw();
-addEventListener('resize', () => { resize(); init(); });
+matrixResize(); drawMatrix(); drawRadar();
+addEventListener('resize', () => { matrixResize(); });
 
 /* ── CURSOR ── */
 const cur = document.getElementById('cursor');
